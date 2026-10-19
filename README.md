@@ -9,8 +9,9 @@
 
 **Open-source translation and AI conversation for Nigerian languages.**
 
-A FastAPI service that translates between **English, Yoruba, Hausa, Igbo and Nigerian Pidgin** and holds
-multilingual conversations with an LLM. It can use several providers at once:
+A FastAPI service and **multilingual AI agent** for **14 languages**: Yoruba, Hausa, Igbo,
+Nigerian Pidgin, Swahili, Kinyarwanda, Shona, isiZulu, isiXhosa, Setswana, Afrikaans,
+isiNdebele, English and French. It can use several providers at once:
 [Azure Translator](https://learn.microsoft.com/azure/ai-services/translator/),
 [Groq](https://groq.com/) or any OpenAI-compatible API, and
 [MORENA](https://huggingface.co/vamboai/morena-1.5b-instruct), an open African-language model
@@ -27,6 +28,9 @@ built in the open so native speakers and developers can improve it together.
 
 ## Features
 
+- **AI agent** (`/v1/agent`) that understands any supported language, uses tools
+  (translation, language detection, time) and answers in the user's language,
+  see [docs/AGENT.md](docs/AGENT.md)
 - **Multiple providers, models and keys** — Azure, Groq, OpenRouter, Together, Cerebras,
   Hugging Face, Ollama or MORENA, tried in order; keys rotate and failing keys, models or
   providers are skipped automatically
@@ -97,6 +101,8 @@ All configuration comes from environment variables (see [`.env.example`](.env.ex
 | `CHAT_PROVIDERS` | no | `LLM_PROVIDERS` | Providers used for `/v1/converse` |
 | `TRANSLATION_PROVIDERS` | no | `azure` + `LLM_PROVIDERS` | Providers used for translation, in order |
 | `DETECTION_PROVIDERS` | no | `azure` + LLM providers except MORENA | Providers used for language detection |
+| `AGENT_PROVIDERS` | no | OpenAI-compatible chat providers | Providers that run the agent (must support tool calling) |
+| `AGENT_MAX_STEPS` | no | `6` | Max model turns per agent request |
 | `KEY_COOLDOWN_SECONDS` | no | `60` | How long to skip a rate-limited key |
 | `INVALID_KEY_COOLDOWN_SECONDS` | no | `3600` | How long to skip a rejected key |
 | `REQUEST_TIMEOUT` | no | `30` | Upstream timeout in seconds |
@@ -144,6 +150,9 @@ TRANSLATION_PROVIDERS=morena,groq,openrouter
 | `POST` | `/v1/translate/batch` | Translate up to 25 texts in one request |
 | `POST` | `/v1/detect` | Detect the language of a text |
 | `POST` | `/v1/converse` | Translate and get an LLM reply |
+| `POST` | `/v1/agent` | Ask the multilingual tool-using agent |
+
+📖 **Full usage guide with curl, Python and JavaScript examples: [docs/USAGE.md](docs/USAGE.md)**
 
 ### Authentication & rate limits
 
@@ -180,6 +189,16 @@ curl -X POST http://localhost:8000/v1/detect \
 # {"language": "ha", "language_name": "Hausa", "score": 1.0, "is_supported": true}
 ```
 
+### Agent
+
+```bash
+curl -X POST http://localhost:8000/v1/agent \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "Nnọọ! Kedu ụbọchị taa?"}'
+# {"answer": "Ụtụtụ ọma! Taa bụ Mọnde, Ọktoba 19, 2026.", "language": "ig", "reply_language": "ig",
+#  "steps": [{"tool": "get_current_time", ...}, {"tool": "translate", ...}]}
+```
+
 ### Converse
 
 ```bash
@@ -211,7 +230,7 @@ config.py            Settings loaded from environment variables
 models.py            Pydantic request/response models
 routes/              HTTP endpoints
 services/            Providers (Azure, LLMs, MORENA), key rotation, cache, language helpers
-docs/                Guides, e.g. running MORENA
+docs/                Usage guide, agent design, running MORENA
 tests/               Pytest suite (upstream services are mocked)
 ```
 

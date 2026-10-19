@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Multilingual agent** (`POST /v1/agent`): a tool-calling model that understands any
+  supported language, uses `translate`, `detect_language`, `list_languages` and
+  `get_current_time`, and answers in the user's (or a chosen) language. Answers are
+  checked to be in the reply language. Configure with `AGENT_PROVIDERS` / `AGENT_MAX_STEPS`.
+- **14 languages**, matching MORENA: adds French, Swahili, Kinyarwanda, Shona, isiZulu,
+  isiXhosa, Setswana, Afrikaans and isiNdebele. Azure is skipped for languages it doesn't offer.
+- `docs/USAGE.md` (curl, Python, JavaScript examples) and `docs/AGENT.md`.
 - **Multiple providers, models and keys.** Any OpenAI-compatible API (Groq, OpenRouter,
   Together, Cerebras, Hugging Face, OpenAI, Ollama, or a custom URL) via `LLM_PROVIDERS`,
   `<NAME>_API_KEYS`, `<NAME>_MODELS` and `<NAME>_BASE_URL`. Keys rotate; rejected or

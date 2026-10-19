@@ -254,7 +254,7 @@ def test_ready_when_configured(client):
     response = client.get("/health/ready")
 
     assert response.status_code == 200
-    assert response.json()["services"] == {"translator": True, "llm": True}
+    assert response.json()["services"] == {"translator": True, "llm": True, "agent": True}
 
 
 def test_not_ready_without_keys(client, monkeypatch):

@@ -129,6 +129,15 @@ DETECTION_PROVIDERS = _env_list("DETECTION_PROVIDERS") or [
     *(name for name, provider in LLM_PROVIDERS.items() if provider.kind != "morena"),
 ]
 
+# Providers for the tool-using agent (/v1/agent); only OpenAI-compatible providers can call tools
+AGENT_PROVIDERS = _env_list("AGENT_PROVIDERS") or [
+    name
+    for name in CHAT_PROVIDERS
+    if name in LLM_PROVIDERS and LLM_PROVIDERS[name].kind == "openai"
+]
+# Maximum reasoning/tool steps per agent request
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
+
 # How long (seconds) to skip a key after it is rejected or rate-limited
 KEY_COOLDOWN_SECONDS = float(os.getenv("KEY_COOLDOWN_SECONDS", "60"))
 INVALID_KEY_COOLDOWN_SECONDS = float(os.getenv("INVALID_KEY_COOLDOWN_SECONDS", "3600"))

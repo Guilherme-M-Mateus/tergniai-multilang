@@ -54,6 +54,7 @@ def reset_state(monkeypatch):
         },
     )
     monkeypatch.setattr(config, "CHAT_PROVIDERS", ["groq"])
+    monkeypatch.setattr(config, "AGENT_PROVIDERS", ["groq"])
     monkeypatch.setattr(config, "TRANSLATION_PROVIDERS", ["azure"])
     monkeypatch.setattr(config, "DETECTION_PROVIDERS", ["azure"])
 
