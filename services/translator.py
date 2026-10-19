@@ -22,9 +22,9 @@ T = TypeVar("T")
 translation_cache = TTLCache(max_items=config.CACHE_MAX_ITEMS, ttl=config.CACHE_TTL_SECONDS)
 
 
-def _is_configured(name: str) -> bool:
+def _is_configured(name: str, languages: Sequence[str] = ()) -> bool:
     if name == "azure":
-        return bool(config.AZURE_TRANSLATOR_KEYS)
+        return bool(config.AZURE_TRANSLATOR_KEYS) and azure_translator.supports(*languages)
     provider = config.LLM_PROVIDERS.get(name)
     return provider is not None and provider.configured
 
@@ -38,12 +38,13 @@ async def _run_chain(
     providers: Sequence[str],
     azure_call: Callable[[], Awaitable[T]],
     llm_call: Callable[[str], Awaitable[T]],
+    languages: Sequence[str] = (),
 ) -> T:
-    """Try each configured provider in order until one succeeds"""
+    """Try each configured provider that supports `languages`, in order, until one succeeds"""
     last_error: Optional[HTTPException] = None
 
     for name in providers:
-        if not _is_configured(name):
+        if not _is_configured(name, languages):
             continue
         try:
             return await (azure_call() if name == "azure" else llm_call(name))
@@ -100,6 +101,7 @@ async def translate_batch(texts: List[str], from_language: str, to_language: str
             config.TRANSLATION_PROVIDERS,
             lambda: azure_translator.translate_batch(pending, from_language, to_language),
             lambda name: assistant.translate_batch(pending, from_language, to_language, name),
+            languages=(from_language, to_language),
         )
         for i, text in zip(missing, translated, strict=True):
             results[i] = text

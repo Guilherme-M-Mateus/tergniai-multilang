@@ -16,12 +16,26 @@ from dotenv import find_dotenv, load_dotenv
 load_dotenv(os.getenv("ENV_FILE") or find_dotenv(usecwd=True))
 
 # Define supported languages
+# Codes are ISO 639-1 where one exists (Nigerian Pidgin uses ISO 639-3 "pcm").
+# This matches the twelve African languages of the MORENA model, plus English and French.
 SUPPORTED_LANGUAGES = {
     "en": "English",
+    "fr": "French",
+    # West Africa
     "yo": "Yoruba",
     "ha": "Hausa",
     "ig": "Igbo",
     "pcm": "Nigerian Pidgin",
+    # East Africa
+    "sw": "Swahili",
+    "rw": "Kinyarwanda",
+    # Southern Africa
+    "sn": "Shona",
+    "zu": "isiZulu",
+    "xh": "isiXhosa",
+    "tn": "Setswana",
+    "af": "Afrikaans",
+    "nr": "isiNdebele",
 }
 
 
