@@ -10,6 +10,7 @@ import httpx
 from fastapi import HTTPException
 
 import config
+from services.keypool import key_pool, mask, retry_after_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -26,31 +27,54 @@ async def _call_azure(path: str, params: Dict[str, str], texts: List[str]) -> An
     Returns:
         Parsed JSON response
     """
-    if not config.AZURE_TRANSLATOR_KEY:
+    if not config.AZURE_TRANSLATOR_KEYS:
         raise HTTPException(status_code=503, detail="Translation service is not configured")
 
+    keys = key_pool.order("azure", config.AZURE_TRANSLATOR_KEYS)
+    if not keys:
+        logger.warning("All Azure Translator keys are cooling down")
+        raise HTTPException(status_code=502, detail="Translation service error")
+
     url = config.AZURE_TRANSLATOR_ENDPOINT.rstrip("/") + path
-
-    headers = {
-        "Ocp-Apim-Subscription-Key": config.AZURE_TRANSLATOR_KEY,
-        "Ocp-Apim-Subscription-Region": config.AZURE_TRANSLATOR_LOCATION,
-        "Content-type": "application/json",
-        "X-ClientTraceId": str(uuid.uuid4()),
-    }
-
     body = [{"text": text} for text in texts]
 
-    try:
-        # Make the request to Azure Translator without blocking the event loop
-        async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT) as client:
-            response = await client.post(
-                url, params={"api-version": "3.0", **params}, headers=headers, json=body
+    # Try each key in rotation; rejected or rate-limited keys are skipped for a while
+    for key in keys:
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Ocp-Apim-Subscription-Region": config.AZURE_TRANSLATOR_LOCATION,
+            "Content-type": "application/json",
+            "X-ClientTraceId": str(uuid.uuid4()),
+        }
+
+        try:
+            # Make the request to Azure Translator without blocking the event loop
+            async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT) as client:
+                response = await client.post(
+                    url, params={"api-version": "3.0", **params}, headers=headers, json=body
+                )
+        except httpx.HTTPError as e:
+            logger.exception("Error connecting to Azure Translator")
+            raise HTTPException(
+                status_code=502, detail="Error connecting to translation service"
+            ) from e
+
+        if response.status_code in (401, 403):
+            logger.warning("Azure key %s was rejected; skipping it for a while", mask(key))
+            key_pool.cool_down(key, config.INVALID_KEY_COOLDOWN_SECONDS)
+            continue
+        if response.status_code == 429:
+            logger.warning("Azure key %s is rate-limited; trying the next key", mask(key))
+            key_pool.cool_down(
+                key,
+                retry_after_seconds(
+                    response.headers.get("retry-after"), config.KEY_COOLDOWN_SECONDS
+                ),
             )
-    except httpx.HTTPError as e:
-        logger.exception("Error connecting to Azure Translator")
-        raise HTTPException(
-            status_code=502, detail="Error connecting to translation service"
-        ) from e
+            continue
+        break
+    else:
+        raise HTTPException(status_code=502, detail="Translation service error")
 
     # Upstream errors are logged but not leaked to the client
     if response.status_code != 200:

@@ -6,8 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Groq LLM translation and language detection, with automatic fallback when Azure Translator
-  is not configured or fails. `TRANSLATION_PROVIDER` selects `auto`, `azure` or `groq`.
+- **Multiple providers, models and keys.** Any OpenAI-compatible API (Groq, OpenRouter,
+  Together, Cerebras, Hugging Face, OpenAI, Ollama, or a custom URL) via `LLM_PROVIDERS`,
+  `<NAME>_API_KEYS`, `<NAME>_MODELS` and `<NAME>_BASE_URL`. Keys rotate; rejected or
+  rate-limited keys are put on cooldown; failing models and providers are skipped.
+- Multiple Azure Translator keys (`AZURE_TRANSLATOR_KEYS`) with the same rotation and cooldown.
+- **MORENA** (Vambo AI, Apache-2.0) provider: a free African-language model run locally with
+  llama.cpp, plus `docker-compose.yml` and `docs/MORENA.md`.
+- Per-task provider order: `CHAT_PROVIDERS`, `TRANSLATION_PROVIDERS`, `DETECTION_PROVIDERS`.
+- LLM-based translation and language detection when Azure is unavailable.
+- Nigerian Pidgin (`pcm`) as a supported language.
+- `ENV_FILE` to choose which env file is loaded.
+
+### Changed
+- The `groq` SDK dependency was replaced by plain HTTP calls to OpenAI-compatible APIs.
+- `GROQ_SYSTEM_PROMPT` is now `SYSTEM_PROMPT`.
 
 ### Fixed
 - Translation endpoints no longer fail entirely when the Azure key is missing or invalid.

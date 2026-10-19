@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 import config
 from config import SUPPORTED_LANGUAGES
+from services import llm
 from services.translator import translation_available
 
 router = APIRouter()
@@ -38,7 +39,7 @@ async def ready():
     """Readiness probe: reports whether upstream services are configured"""
     services = {
         "translator": translation_available(),
-        "llm": bool(config.GROQ_API_KEY),
+        "llm": llm.is_configured(config.CHAT_PROVIDERS),
     }
     is_ready = all(services.values())
     return JSONResponse(

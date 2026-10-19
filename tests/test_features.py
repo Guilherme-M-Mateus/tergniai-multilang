@@ -258,7 +258,7 @@ def test_ready_when_configured(client):
 
 
 def test_not_ready_without_keys(client, monkeypatch):
-    monkeypatch.setattr(config, "GROQ_API_KEY", "")
+    monkeypatch.setattr(config, "CHAT_PROVIDERS", [])
 
     response = client.get("/health/ready")
 

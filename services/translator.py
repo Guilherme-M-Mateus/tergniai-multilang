@@ -1,14 +1,17 @@
 """
-Translation and language detection with provider selection, fallback and caching
+Translation and language detection over an ordered chain of providers, with caching
+
+Providers come from TRANSLATION_PROVIDERS / DETECTION_PROVIDERS: "azure" or any LLM
+provider name. Unconfigured providers are skipped; if one fails the next is tried.
 """
 
 import logging
-from typing import Awaitable, Callable, List, Optional, Tuple, TypeVar
+from typing import Awaitable, Callable, List, Optional, Sequence, Tuple, TypeVar
 
 from fastapi import HTTPException
 
 import config
-from services import azure_translator, groq_service
+from services import assistant, azure_translator
 from services.cache import TTLCache
 
 logger = logging.getLogger(__name__)
@@ -19,34 +22,40 @@ T = TypeVar("T")
 translation_cache = TTLCache(max_items=config.CACHE_MAX_ITEMS, ttl=config.CACHE_TTL_SECONDS)
 
 
+def _is_configured(name: str) -> bool:
+    if name == "azure":
+        return bool(config.AZURE_TRANSLATOR_KEYS)
+    provider = config.LLM_PROVIDERS.get(name)
+    return provider is not None and provider.configured
+
+
 def translation_available() -> bool:
-    """Whether any configured provider can translate"""
-    if config.TRANSLATION_PROVIDER == "azure":
-        return bool(config.AZURE_TRANSLATOR_KEY)
-    if config.TRANSLATION_PROVIDER == "groq":
-        return bool(config.GROQ_API_KEY)
-    return bool(config.AZURE_TRANSLATOR_KEY or config.GROQ_API_KEY)
+    """Whether any translation provider is configured"""
+    return any(_is_configured(name) for name in config.TRANSLATION_PROVIDERS)
 
 
-async def _with_fallback(
-    azure_call: Callable[[], Awaitable[T]], groq_call: Callable[[], Awaitable[T]]
+async def _run_chain(
+    providers: Sequence[str],
+    azure_call: Callable[[], Awaitable[T]],
+    llm_call: Callable[[str], Awaitable[T]],
 ) -> T:
-    """Run the call on the configured provider, falling back from Azure to Groq in auto mode"""
-    provider = config.TRANSLATION_PROVIDER
+    """Try each configured provider in order until one succeeds"""
+    last_error: Optional[HTTPException] = None
 
-    if not translation_available():
+    for name in providers:
+        if not _is_configured(name):
+            continue
+        try:
+            return await (azure_call() if name == "azure" else llm_call(name))
+        except HTTPException as e:
+            if e.status_code < 500:
+                raise
+            logger.warning("Provider %s failed (%s); trying the next provider", name, e.status_code)
+            last_error = e
+
+    if last_error is None:
         raise HTTPException(status_code=503, detail="Translation service is not configured")
-
-    if provider == "groq" or (provider == "auto" and not config.AZURE_TRANSLATOR_KEY):
-        return await groq_call()
-
-    try:
-        return await azure_call()
-    except HTTPException as e:
-        if provider == "auto" and config.GROQ_API_KEY and e.status_code >= 500:
-            logger.warning("Azure Translator failed (%s); falling back to Groq", e.status_code)
-            return await groq_call()
-        raise
+    raise last_error
 
 
 async def translate_text(content: str, from_language: str, to_language: str) -> str:
@@ -87,9 +96,10 @@ async def translate_batch(texts: List[str], from_language: str, to_language: str
 
     if missing:
         pending = [texts[i] for i in missing]
-        translated = await _with_fallback(
+        translated = await _run_chain(
+            config.TRANSLATION_PROVIDERS,
             lambda: azure_translator.translate_batch(pending, from_language, to_language),
-            lambda: groq_service.translate_batch(pending, from_language, to_language),
+            lambda name: assistant.translate_batch(pending, from_language, to_language, name),
         )
         for i, text in zip(missing, translated, strict=True):
             results[i] = text
@@ -105,7 +115,8 @@ async def detect_language(content: str) -> Tuple[str, float]:
     Returns:
         Tuple of (language code, confidence score between 0 and 1)
     """
-    return await _with_fallback(
+    return await _run_chain(
+        config.DETECTION_PROVIDERS,
         lambda: azure_translator.detect_language(content),
-        lambda: groq_service.detect_language(content),
+        lambda name: assistant.detect_language(content, name),
     )

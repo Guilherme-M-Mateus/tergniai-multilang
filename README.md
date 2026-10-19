@@ -9,10 +9,12 @@
 
 **Open-source translation and AI conversation for Nigerian languages.**
 
-A FastAPI service that translates between **English, Yoruba, Hausa and Igbo** and holds
-multilingual conversations with an LLM. Translation is powered by
-[Azure Translator](https://learn.microsoft.com/azure/ai-services/translator/) and responses
-by [Groq](https://groq.com/) (`openai/gpt-oss-120b` by default).
+A FastAPI service that translates between **English, Yoruba, Hausa, Igbo and Nigerian Pidgin** and holds
+multilingual conversations with an LLM. It can use several providers at once:
+[Azure Translator](https://learn.microsoft.com/azure/ai-services/translator/),
+[Groq](https://groq.com/) or any OpenAI-compatible API, and
+[MORENA](https://huggingface.co/vamboai/morena-1.5b-instruct), an open African-language model
+you can run for free.
 
 ## Why this project?
 
@@ -25,11 +27,15 @@ built in the open so native speakers and developers can improve it together.
 
 ## Features
 
+- **Multiple providers, models and keys** — Azure, Groq, OpenRouter, Together, Cerebras,
+  Hugging Face, Ollama or MORENA, tried in order; keys rotate and failing keys, models or
+  providers are skipped automatically
+- **Free, local African-language model** — run [MORENA](docs/MORENA.md) with llama.cpp
 - **Translate** text between any two supported languages, one at a time or in batches
 - **Auto-detect** the source language — pass `"from_language": "auto"` to any endpoint
 - **Converse** in any supported language; the reply comes back in the target language,
   with optional multi-turn memory (`memory_context`)
-- **Translation cache** (in-memory TTL/LRU) to save Azure quota on repeated phrases
+- **Translation cache** (in-memory TTL/LRU) to save quota on repeated phrases
 - **API-key authentication** (`X-API-Key`) and **per-client rate limiting**
 - **Request IDs** (`X-Request-ID`) and timing headers for tracing
 - Input validation, upstream timeouts and consistent JSON error responses
@@ -41,7 +47,9 @@ built in the open so native speakers and developers can improve it together.
 ### Prerequisites
 
 - Python 3.10+
-- A Groq API key (an Azure Translator key is optional)
+- At least one provider: a [Groq API key](https://console.groq.com/keys) (free tier),
+  [MORENA running locally](docs/MORENA.md) (free), an Azure Translator key, or any
+  OpenAI-compatible API
 
 ### Run locally
 
@@ -64,18 +72,33 @@ docker build -t terngi-ai .
 docker run --rm -p 8000:8000 --env-file .env terngi-ai
 ```
 
+### Run with MORENA (free, no API keys needed)
+
+```bash
+docker compose --profile morena up
+```
+
+This starts the API and a llama.cpp server with MORENA 1.5B (downloaded on first start,
+about 0.9 GB). See [docs/MORENA.md](docs/MORENA.md).
+
 ## Configuration
 
 All configuration comes from environment variables (see [`.env.example`](.env.example)).
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `AZURE_TRANSLATOR_KEY` | no* | — | Azure Translator subscription key |
+| `AZURE_TRANSLATOR_KEYS` | no* | — | Azure Translator keys (comma-separated, rotated) |
 | `AZURE_TRANSLATOR_ENDPOINT` | no | `https://api.cognitive.microsofttranslator.com` | Translator endpoint |
 | `AZURE_TRANSLATOR_LOCATION` | no | `global` | Azure resource region |
-| `GROQ_API_KEY` | yes* | — | Groq API key (chat, and translation fallback) |
-| `TRANSLATION_PROVIDER` | no | `auto` | `auto` (Azure, falling back to Groq), `azure` or `groq` |
-| `GROQ_MODEL` | no | `openai/gpt-oss-120b` | Groq model ID |
+| `LLM_PROVIDERS` | no | `groq` | LLM providers in priority order |
+| `<NAME>_API_KEYS` | yes* | — | Keys for a provider, e.g. `GROQ_API_KEYS=k1,k2` (`<NAME>_API_KEY` also works) |
+| `<NAME>_MODELS` | no | provider default | Models to try in order, e.g. `GROQ_MODELS=openai/gpt-oss-120b,openai/gpt-oss-20b` |
+| `<NAME>_BASE_URL` | for custom providers | preset | OpenAI-compatible base URL |
+| `CHAT_PROVIDERS` | no | `LLM_PROVIDERS` | Providers used for `/v1/converse` |
+| `TRANSLATION_PROVIDERS` | no | `azure` + `LLM_PROVIDERS` | Providers used for translation, in order |
+| `DETECTION_PROVIDERS` | no | `azure` + LLM providers except MORENA | Providers used for language detection |
+| `KEY_COOLDOWN_SECONDS` | no | `60` | How long to skip a rate-limited key |
+| `INVALID_KEY_COOLDOWN_SECONDS` | no | `3600` | How long to skip a rejected key |
 | `REQUEST_TIMEOUT` | no | `30` | Upstream timeout in seconds |
 | `MAX_CONTENT_LENGTH` | no | `5000` | Max characters per message |
 | `MAX_MEMORY_MESSAGES` | no | `20` | Max turns in `memory_context` |
@@ -88,10 +111,26 @@ All configuration comes from environment variables (see [`.env.example`](.env.ex
 | `CORS_ORIGINS` | no | *(disabled)* | Comma-separated allowed origins |
 | `LOG_LEVEL` | no | `INFO` | Python log level |
 
-\* You need at least one translation provider. With only `GROQ_API_KEY`, the LLM handles
-translation and language detection too. With both keys, Azure is used first and Groq takes
-over automatically if Azure fails. The app starts without keys; endpoints that need a missing
-key return `503`.
+\* You need at least one provider. Built-in provider names are `groq`, `openrouter`,
+`together`, `cerebras`, `huggingface`, `openai`, `ollama` and `morena`; any other name works
+when you set `<NAME>_BASE_URL` to an OpenAI-compatible API.
+
+**How fallback works:** for each request, providers are tried in order. Within a provider,
+each model is tried in order, and keys rotate between requests. A key that is rejected
+(401/403) or rate-limited (429) is skipped for a while; a model that errors or returns
+unusable output is skipped for that request. The app starts without keys; endpoints with
+no configured provider return `503`.
+
+Example, using two Groq keys, OpenRouter as a backup and MORENA for translation:
+
+```bash
+LLM_PROVIDERS=groq,openrouter,morena
+GROQ_API_KEYS=gsk_key_one,gsk_key_two
+GROQ_MODELS=openai/gpt-oss-120b,openai/gpt-oss-20b
+OPENROUTER_API_KEYS=sk-or-...
+OPENROUTER_MODELS=meta-llama/llama-3.3-70b-instruct
+TRANSLATION_PROVIDERS=morena,groq,openrouter
+```
 
 ## API
 
@@ -171,7 +210,8 @@ middleware.py        Request IDs, API-key auth and rate limiting
 config.py            Settings loaded from environment variables
 models.py            Pydantic request/response models
 routes/              HTTP endpoints
-services/            Azure Translator, Groq, cache and language helpers
+services/            Providers (Azure, LLMs, MORENA), key rotation, cache, language helpers
+docs/                Guides, e.g. running MORENA
 tests/               Pytest suite (upstream services are mocked)
 ```
 
