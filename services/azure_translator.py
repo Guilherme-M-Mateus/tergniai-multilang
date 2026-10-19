@@ -4,18 +4,14 @@ Azure Translator service for the Terngi Translation API
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import httpx
 from fastapi import HTTPException
 
 import config
-from services.cache import TTLCache
 
 logger = logging.getLogger(__name__)
-
-# Cache of (from_language, to_language, content) -> translated text
-translation_cache = TTLCache(max_items=config.CACHE_MAX_ITEMS, ttl=config.CACHE_TTL_SECONDS)
 
 
 async def _call_azure(path: str, params: Dict[str, str], texts: List[str]) -> Any:
@@ -69,24 +65,9 @@ async def _call_azure(path: str, params: Dict[str, str], texts: List[str]) -> An
         ) from e
 
 
-async def translate_text(content: str, from_language: str, to_language: str) -> str:
-    """
-    Translate text using Azure Translator
-
-    Args:
-        content: Text to translate
-        from_language: Source language code
-        to_language: Target language code
-
-    Returns:
-        Translated text
-    """
-    return (await translate_batch([content], from_language, to_language))[0]
-
-
 async def translate_batch(texts: List[str], from_language: str, to_language: str) -> List[str]:
     """
-    Translate several texts in a single Azure request, reusing cached results
+    Translate several texts in a single Azure request
 
     Args:
         texts: Texts to translate
@@ -96,33 +77,14 @@ async def translate_batch(texts: List[str], from_language: str, to_language: str
     Returns:
         Translated texts, in the same order as the input
     """
-    # If source and target languages are the same, no need to translate
-    if from_language == to_language:
-        return list(texts)
-
-    results: List[Optional[str]] = [
-        translation_cache.get((from_language, to_language, text)) for text in texts
-    ]
-    missing = [i for i, result in enumerate(results) if result is None]
-
-    if missing:
-        data = await _call_azure(
-            "/translate",
-            {"from": from_language, "to": to_language},
-            [texts[i] for i in missing],
-        )
-        try:
-            translated = [item["translations"][0]["text"] for item in data]
-        except (LookupError, TypeError) as e:
-            raise HTTPException(status_code=502, detail="No translation result received") from e
-        if len(translated) != len(missing):
-            raise HTTPException(status_code=502, detail="No translation result received")
-
-        for i, text in zip(missing, translated, strict=True):
-            results[i] = text
-            translation_cache.set((from_language, to_language, texts[i]), text)
-
-    return [result or "" for result in results]
+    data = await _call_azure("/translate", {"from": from_language, "to": to_language}, texts)
+    try:
+        translated = [item["translations"][0]["text"] for item in data]
+    except (LookupError, TypeError) as e:
+        raise HTTPException(status_code=502, detail="No translation result received") from e
+    if len(translated) != len(texts):
+        raise HTTPException(status_code=502, detail="No translation result received")
+    return translated
 
 
 async def detect_language(content: str) -> Tuple[str, float]:

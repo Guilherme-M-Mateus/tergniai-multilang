@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 import config
 from config import SUPPORTED_LANGUAGES
+from services.translator import translation_available
 
 router = APIRouter()
 
@@ -36,7 +37,7 @@ async def health():
 async def ready():
     """Readiness probe: reports whether upstream services are configured"""
     services = {
-        "translator": bool(config.AZURE_TRANSLATOR_KEY),
+        "translator": translation_available(),
         "llm": bool(config.GROQ_API_KEY),
     }
     is_ready = all(services.values())
